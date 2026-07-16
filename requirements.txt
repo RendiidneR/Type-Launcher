@@ -3,3 +3,5 @@ uvicorn==0.28.0
 supabase==2.3.0
 pydantic==2.6.4
 bcrypt==4.1.2
+felt==0.86.0
+felt-desktop==0.86.0
