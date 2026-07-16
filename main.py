@@ -1,6 +1,7 @@
 import flet as ft
 import smtplib
 import random
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import session
@@ -12,6 +13,9 @@ result_text = ""
 error_text = ""
 code = ""
 
+# Адрес твоего локального сервера (или сервера на Render)
+API_REGISTER_URL = "http://127.0.0.1:8000/api/register"
+
 SMTP_SERVER = "smtp.yandex.ru"
 SMTP_PORT = 465
 
@@ -22,6 +26,11 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.vertical_alignment = ft.MainAxisAlignment.CENTER
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+
+    generated_code = ""
+    user_nickname = ""
+    user_password = ""
+    user_email = ""
 
     def go_to_register():
         page.controls.clear()
@@ -61,48 +70,90 @@ def main(page: ft.Page):
             print(f"[DEBUG] Ошибка отправки почты: {ex}")
             return False
 
-    def verify_email(e):  # Добавьте аргумент 'e' (event), так как эта функция вызывается кнопкой!
-        nickname = nickname_input.value
-        password = password_input.value
-        email = email_input.value
+    def verify_email(e):
+        nonlocal generated_code, user_nickname, user_password, user_email
 
-        if agree_checkbox.value:
-            # 1. Генерируем 6-значный код и сохраняем его в глобальную/внешнюю переменную,
-            # чтобы потом сравнить его на следующем экране
-            global code  # Если generated_code объявлена на уровне main(), используйте nonlocal generated_code
-            code = str(random.randint(100000, 999999))
-            print(f"[DEBUG] Сгенерирован код: {code}")  # Для проверки в консоли
+        user_nickname = nickname_input.value.strip()
+        user_password = password_input.value
+        user_email = email_input.value.strip()
 
-            # 2. Отправляем на почту, которую ввёл пользователь, сгенерированный код
-            send_email(email, code)
+        # Проверка на заполнение полей
+        if not user_nickname:
+            error_text.value = "Введите никнейм"
+            page.update()
+            return
+        if not user_password:
+            error_text.value = "Введите пароль"
+            page.update()
+            return
+        if not user_email:
+            error_text.value = "Введите email"
+            page.update()
+            return
 
-            # 3. Переключаем экран
+        if not agree_checkbox.value:
+            error_text.value = "Нужно согласиться с условиями"
+            page.update()
+            return
+
+        # Если всё заполнено и галочка стоит — генерируем код и отправляем email
+        error_text.value = ""
+        generated_code = str(random.randint(100000, 999999))
+        print(f"[DEBUG] Сгенерирован код: {generated_code}")
+
+        # Отправляем письмо во внешнем потоке (или просто так, если не боишься секундного зависания UI)
+        email_sent = send_email(user_email, generated_code)
+
+        if email_sent:
             page.controls.clear()
             page.add(verify_email_frame)
             page.update()
         else:
-            error_text.value = "Нужно согласиться с условиями"
+            error_text.value = "Не удалось отправить код на почту!"
             page.update()
-        if nickname == "":
-            error_text.value = "Введите никнейм"
-        elif password == "":
-            error_text.value = "Введите пароль"
-        elif email == "":
-            error_text.value = "Введите email"
-        if nickname == "" and agree_checkbox.value:
-            error_text.value = "Введите никнейм"
-        elif password == "" and agree_checkbox.value:
-            error_text.value = "Введите пароль"
-        elif email == "" and agree_checkbox.value:
-            error_text.value = "Введите email"
 
-    def check_code(code):
-        entered_code = enter_code.value
-        if entered_code == code:
-            result_text = "Регистрация успешна!"
-            page.update()
+    def check_code(e):
+        # Используем сохраненные ранее данные пользователя и сгенерированный код
+        nonlocal generated_code, user_nickname, user_password, user_email
+
+        entered_code = enter_code.value.strip()
+
+        if entered_code == generated_code:
+            # Код подтвержден! Теперь отправляем данные на наш сервер
+            try:
+                # Формируем тело запроса (в зависимости от того, как у тебя настроен бэкенд)
+                payload = {
+                    "username": user_nickname,
+                    "email": user_email,
+                    "password": user_password
+                }
+
+                # Делаем POST-запрос к нашему FastAPI
+                response = requests.post(API_REGISTER_URL, json=payload, timeout=8)
+
+                if response.status_code == 200:
+                    # Успех! Supabase сохранил пользователя
+                    print("[DEBUG] Регистрация на сервере прошла успешно!")
+
+                    # Здесь ты можешь сразу сохранить сессию в файл session.json через твой импортированный модуль session
+                    # session.save_session(...)
+
+                    # Переводим игрока в главное меню
+                    go_to_mainmenu()
+                else:
+                    # Сервер вернул ошибку (например, никнейм уже занят)
+                    server_error = response.json().get("detail", "Ошибка сервера при регистрации")
+                    # Выведем ошибку на экран верификации (можешь добавить элемент ft.Text в verify_email_frame)
+                    print(f"[DEBUG] Ошибка от сервера: {server_error}")
+                    enter_code.error_text = server_error
+                    page.update()
+
+            except requests.exceptions.RequestException as ex:
+                enter_code.error_text = "Нет связи с сервером авторизации."
+                page.update()
+                print(f"[DEBUG] Ошибка запроса к FastAPI: {ex}")
         else:
-            result_text = "Неверный код!"
+            enter_code.error_text = "Неверный код подтверждения!"
             page.update()
 
     nickname_input = ft.TextField(
@@ -184,7 +235,7 @@ def main(page: ft.Page):
     )
 
     verify_email_button = ft.FilledButton(
-        content = ft.Row(
+        content=ft.Row(
             [
                 ft.Icon(ft.Icons.CHEVRON_RIGHT),
                 ft.Text("Продолжить", weight=ft.FontWeight.BOLD)
@@ -193,7 +244,7 @@ def main(page: ft.Page):
             spacing=10
         ),
         width=170,
-        on_click=check_code
+        on_click=check_code  # <--- Просто передаем имя функции!
     )
 
     register_frame = ft.Container(
