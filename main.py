@@ -5,6 +5,11 @@ import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import session
+import os
+
+# Вместо прямой строки читаем из системы:
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 nickname = ""
 password = ""
@@ -14,7 +19,7 @@ error_text = ""
 code = ""
 
 # Адрес твоего локального сервера (или сервера на Render)
-API_REGISTER_URL = "http://127.0.0.1:8000/api/register"
+API_REGISTER_URL = "https://type-launcher.onrender.com"
 
 SMTP_SERVER = "smtp.yandex.ru"
 SMTP_PORT = 465
